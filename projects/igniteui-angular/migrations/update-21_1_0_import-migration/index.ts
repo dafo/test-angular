@@ -59,13 +59,13 @@ function migrateImportDeclaration(node: ts.ImportDeclaration, sourceFile: ts.Sou
 
     // Generate new import statements
     const newImports: string[] = [];
-    
+
     // Add remaining grids/core imports first
     if (remainingInCore.length > 0) {
         const sortedImports = remainingInCore.sort();
         newImports.push(`import { ${sortedImports.join(', ')} } from '${importPath}';`);
     }
-    
+
     // Add moved imports
     for (const [entryPoint, imports] of entryPointGroups) {
         const sortedImports = imports.sort();
