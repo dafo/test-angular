@@ -12,7 +12,7 @@
             "igniteui-angular/*": [
                 "../*"
             ],
-            "@infragistics/igniteui-angular/*": [
+            "dafo/igniteui-angular/*": [
                 "../*"
             ],
         },
