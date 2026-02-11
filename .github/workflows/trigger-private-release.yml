@@ -1,0 +1,53 @@
+name: Trigger Private Repo Release
+
+on:
+  release:
+    types: [published]
+    # Triggers when a release is published (not draft, not prerelease unless explicitly published)
+    # Change to [created] if you want to trigger on all releases including drafts
+    # Add 'prereleased' to trigger on pre-releases too
+
+jobs:
+  dispatch-to-private-repo:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Send repository dispatch to private repo
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ secrets.PRIVATE_REPO_DISPATCH_TOKEN }}
+          # TODO: Replace with your actual organization and private repository name
+          repository: dafo/private-actions
+          event-type: public-release-created
+          client-payload: |
+            {
+              "release_tag": "${{ github.event.release.tag_name }}",
+              "release_name": "${{ github.event.release.name }}",
+              "release_body": ${{ toJSON(github.event.release.body) }},
+              "release_url": "${{ github.event.release.html_url }}",
+              "release_id": "${{ github.event.release.id }}",
+              "is_prerelease": ${{ github.event.release.prerelease }},
+              "is_draft": ${{ github.event.release.draft }},
+              "published_at": "${{ github.event.release.published_at }}",
+              "author": "${{ github.event.release.author.login }}",
+              "tarball_url": "${{ github.event.release.tarball_url }}",
+              "zipball_url": "${{ github.event.release.zipball_url }}",
+              "public_repo": "${{ github.repository }}"
+            }
+
+      - name: Log dispatch success
+        if: success()
+        run: |
+          echo "✅ Successfully dispatched release event to private repository"
+          echo "Release: ${{ github.event.release.tag_name }}"
+          echo "Event type: public-release-created"
+          echo "Timestamp: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+      - name: Log dispatch failure
+        if: failure()
+        run: |
+          echo "❌ Failed to dispatch release event"
+          echo "Release: ${{ github.event.release.tag_name }}"
+          echo "Check if PRIVATE_REPO_DISPATCH_TOKEN secret is configured correctly"
+          echo "Verify the target repository path is correct"
+          exit 1
