@@ -7,7 +7,7 @@ import { Logger } from './tsLogger';
 import { TSLanguageService } from './tsPlugin/TSLanguageService';
 
 export const IG_PACKAGE_NAME = 'igniteui-angular';
-export const IG_LICENSED_PACKAGE_NAME = 'dafo/igniteui-angular';
+export const IG_LICENSED_PACKAGE_NAME = '@infragistics/igniteui-angular';
 export const NG_LANG_SERVICE_PACKAGE_NAME = '@angular/language-service';
 export const NG_CORE_PACKAGE_NAME = '@angular/core';
 export const CUSTOM_TS_PLUGIN_PATH = './tsPlugin';
@@ -15,8 +15,8 @@ export const CUSTOM_TS_PLUGIN_NAME = 'igx-ts-plugin';
 
 /**
  * Checks if the given import path is from igniteui-angular package.
- * Handles both OSS (igniteui-angular) and licensed (dafo/igniteui-angular) versions,
- * as well as subpaths (e.g., igniteui-angular/core, dafo/igniteui-angular/grids).
+ * Handles both OSS (igniteui-angular) and licensed (@infragistics/igniteui-angular) versions,
+ * as well as subpaths (e.g., igniteui-angular/core, @infragistics/igniteui-angular/grids).
  * @param importPath The module specifier text to check
  * @returns true if the import path is from igniteui-angular package
  */

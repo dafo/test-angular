@@ -249,7 +249,7 @@ describe(`Update to ${version}`, () => {
         );
     });
 
-    for (const igPackage of ['igniteui-angular', 'dafo/igniteui-angular']) {
+    for (const igPackage of ['igniteui-angular', '@infragistics/igniteui-angular']) {
         it('should move animation imports from igniteui-angular to igniteui-angular/animations', async () => {
             appTree.create(`/testSrc/appPrefix/component/test.component.ts`,
 `import { IgxButtonModule, flipRight, IgxIconModule, slideInBr, scaleOutHorLeft, IgxRippleModule, EaseOut } from '${igPackage}';

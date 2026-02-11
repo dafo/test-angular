@@ -511,8 +511,8 @@ export class Test {
         expect(appTree.readContent('test.component.ts')).toEqual(expectedFileContent);
 
         // with ig feed package:
-        fileContent = fileContent.replace(/igniteui-angular/g, 'dafo/igniteui-angular');
-        expectedFileContent = expectedFileContent.replace(/igniteui-angular/g, 'dafo/igniteui-angular');
+        fileContent = fileContent.replace(/igniteui-angular/g, '@infragistics/igniteui-angular');
+        expectedFileContent = expectedFileContent.replace(/igniteui-angular/g, '@infragistics/igniteui-angular');
         appTree.overwrite('test.component.ts', fileContent);
         update.applyChanges();
         expect(appTree.readContent('test.component.ts')).toEqual(expectedFileContent);
