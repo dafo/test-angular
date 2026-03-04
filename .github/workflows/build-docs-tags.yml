@@ -299,7 +299,7 @@ jobs:
   # configure it in the deploy workflow environment.
   deploy-staging:
     needs: build-docs
-    if: inputs.skipDeployment != true
+    if: github.event_name == 'push' || !inputs.skipDeployment
     uses: IgniteUI/igniteui-actions/.github/workflows/deploy.yml@master
     secrets: inherit
     with:
@@ -315,7 +315,7 @@ jobs:
   # Deploy production docs — only on CI push of a non-pre-release tag.
   deploy-production:
     needs: build-docs
-    if: inputs.skipDeployment != true && github.event_name == 'push' && needs.build-docs.outputs.productionDeployment == 'True'
+    if: github.event_name == 'push' && needs.build-docs.outputs.productionDeployment == 'True'
     uses: IgniteUI/igniteui-actions/.github/workflows/deploy.yml@master
     secrets: inherit
     with:
