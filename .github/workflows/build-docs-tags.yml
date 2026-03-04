@@ -16,7 +16,7 @@ on:
         description: 'Skip deployment (for testing only)'
         required: false
         type: boolean
-        default: false
+        default: 'false'
 
 jobs:
   build-docs:
