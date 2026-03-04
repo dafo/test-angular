@@ -1,0 +1,206 @@
+# CORRECTED: Licensed Release Pipeline Workflow
+# Copy this to your private repo: .github/workflows/licensed-release.yml
+
+name: Licensed Release Pipeline
+
+on:
+  repository_dispatch:
+    types: [public-release-created]
+
+env:
+  REPLACEMENT_TEXT: ''
+  LINT_TEXT_REPLACEMENT: ''
+
+jobs:
+  build-licensed-release:
+    name: Build Licensed Release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout public repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.client_payload.public_repo }}
+          ref: ${{ github.event.client_payload.release_tag }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Remove watermark from package.json
+        shell: pwsh
+        run: |
+          Get-ChildItem -Recurse -Filter "package.json" | ForEach-Object {
+            try {
+              $content = Get-Content $_.FullName -Raw
+              $content = $content -replace '(,\r?\n\s+"igniteui-trial-watermark":\s+"[^"]*")', '${{ env.REPLACEMENT_TEXT }}'
+              Set-Content $_.FullName -Value $content -NoNewline
+            } catch {
+              Write-Warning "Failed: $($_.FullName)"
+            }
+          }
+
+      - name: Update the lint command
+        shell: pwsh
+        run: |
+          Get-ChildItem -Recurse -Filter "package.json" | ForEach-Object {
+            $content = Get-Content $_.FullName -Raw
+            $content = $content -replace '(ng lint)', '${{ env.LINT_TEXT_REPLACEMENT }}'
+            Set-Content $_.FullName -Value $content -NoNewline
+          }
+
+      - name: Remove watermark from ng-package.json
+        shell: pwsh
+        run: |
+          Get-ChildItem -Path "projects\igniteui-angular" -Filter "ng-package*.json" -Recurse | ForEach-Object {
+            $content = Get-Content $_.FullName -Raw
+            $content = $content -replace '(,\r?\n\s*"igniteui-trial-watermark")', '${{ env.REPLACEMENT_TEXT }}'
+            Set-Content $_.FullName -Value $content -NoNewline
+          }
+
+      - name: Remove watermark from templates
+        shell: pwsh
+        run: |
+          Get-ChildItem -Path "projects\igniteui-angular" -Recurse -Filter "*.component.html" |
+            Where-Object { $_.FullName -match "\\grids\\" } | ForEach-Object {
+            $content = Get-Content $_.FullName -Raw
+            $content = $content -replace '(\s*<igc-trial-watermark[^>]*>.*?<\/igc-trial-watermark>)', '${{ env.REPLACEMENT_TEXT }}'
+            Set-Content $_.FullName -Value $content -NoNewline
+          }
+
+      - name: Remove watermark import from grid-base directive
+        shell: pwsh
+        run: |
+          Get-ChildItem -Path "projects\igniteui-angular" -Recurse -Filter "grid-base.directive.ts" |
+            Where-Object { $_.FullName -match "\\grids\\" } | ForEach-Object {
+            $content = Get-Content $_.FullName -Raw
+            $content = $content -replace "(import.+''igniteui-trial-watermark'';\r?\n)", '${{ env.REPLACEMENT_TEXT }}'
+            Set-Content $_.FullName -Value $content -NoNewline
+          }
+
+      - name: Remove watermark register from grid-base directive
+        shell: pwsh
+        run: |
+          Get-ChildItem -Path "projects\igniteui-angular" -Recurse -Filter "grid-base.directive.ts" |
+            Where-Object { $_.FullName -match "\\grids\\" } | ForEach-Object {
+            $content = Get-Content $_.FullName -Raw
+            $content = $content -replace '(IgcTrialWatermark\.register\(\);\r?\n)', '${{ env.REPLACEMENT_TEXT }}'
+            Set-Content $_.FullName -Value $content -NoNewline
+          }
+
+      - name: Remove custom element schemas module import
+        shell: pwsh
+        run: |
+          Get-ChildItem -Path "projects\igniteui-angular" -Recurse |
+            Where-Object {
+              ($_.Name -like "*.module.ts" -or $_.Name -like "*grid.component.ts") -and
+              $_.FullName -match "\\grids\\"
+            } | ForEach-Object {
+            $content = Get-Content $_.FullName -Raw
+            $content = $content -replace '\s*CUSTOM_ELEMENTS_SCHEMA\s*,?\s*', '${{ env.REPLACEMENT_TEXT }}'
+            Set-Content $_.FullName -Value $content -NoNewline
+          }
+
+      - name: Update the name in package.json file
+        shell: pwsh
+        run: |
+          Get-ChildItem -Recurse -Filter "package.json" | ForEach-Object {
+            $content = Get-Content $_.FullName -Raw
+            $content = $content -replace '"name":\s*"\w+-\w+"', '"name": "@infragistics/igniteui-angular"'
+            Set-Content $_.FullName -Value $content -NoNewline
+          }
+
+      - name: Update igniteui-angular references in package.json
+        shell: pwsh
+        run: |
+          Get-ChildItem -Recurse -Filter "package.json" | ForEach-Object {
+            $content = Get-Content $_.FullName -Raw
+            # Replace igniteui-angular but not if already @infragistics/
+            $content = $content -replace '(?<!")igniteui-angular(?!")', '@infragistics/igniteui-angular'
+            Set-Content $_.FullName -Value $content -NoNewline
+          }
+
+      - name: Update igniteui-angular-extras references
+        shell: pwsh
+        run: |
+          Get-ChildItem -Recurse -Filter "package.json" | ForEach-Object {
+            $content = Get-Content $_.FullName -Raw
+            $content = $content -replace '(?<!")igniteui-angular-extras(?!")', '@infragistics/igniteui-angular-extras'
+            Set-Content $_.FullName -Value $content -NoNewline
+          }
+
+      # CRITICAL FIX: Do multi-entry-points FIRST, then animations
+      - name: Multi-entry-points replace imports (21 and above)
+        if: startsWith(github.event.client_payload.release_tag, '21') || startsWith(github.event.client_payload.release_tag, 'v21')
+        shell: pwsh
+        run: |
+          Write-Host "Replacing igniteui-angular imports with @infragistics/igniteui-angular..."
+          Get-ChildItem -Path "projects\igniteui-angular" -Recurse -Filter "*.ts" | ForEach-Object {
+            $content = Get-Content $_.FullName -Raw
+            # FIXED: Only replace if NOT already @infragistics/
+            # Match: from 'igniteui-angular or from "igniteui-angular
+            # But NOT: from '@infragistics/igniteui-angular
+            $newContent = $content -replace "from ([`"'])igniteui-angular/", 'from $1@infragistics/igniteui-angular/'
+            $newContent = $newContent -replace "from ([`"'])igniteui-angular([`"'])", 'from $1@infragistics/igniteui-angular$2'
+
+            if ($content -ne $newContent) {
+              Set-Content $_.FullName -Value $newContent -NoNewline
+              Write-Host "✓ Updated: $($_.Name)"
+            }
+          }
+
+      - name: Change animation imports
+        shell: pwsh
+        run: |
+          Get-ChildItem -Path "projects\igniteui-angular" -Recurse -Filter "*.ts" | ForEach-Object {
+            $content = Get-Content $_.FullName -Raw
+            # This will only update if not already prefixed from previous step
+            $content = $content -replace 'igniteui-angular/animations', '@infragistics/igniteui-angular/animations'
+            Set-Content $_.FullName -Value $content -NoNewline
+          }
+
+      - name: Change migrations imports
+        shell: pwsh
+        run: |
+          Get-ChildItem -Path "projects\igniteui-angular\migrations" -Recurse -Filter "*.ts" | ForEach-Object {
+            $content = Get-Content $_.FullName -Raw
+            # FIXED: Single quote instead of double single quote ''
+            $content = $content -replace "from 'igniteui-angular/migrations/common", "from '@infragistics/igniteui-angular/migrations/common"
+            Set-Content $_.FullName -Value $content -NoNewline
+          }
+
+      - name: Clean install dependencies
+        run: npm ci
+
+      - name: Clear Angular cache
+        run: rm -rf .angular node_modules/.cache
+
+      # FIXED: Add NODE_OPTIONS for memory
+      - name: Build library
+        run: npm run build:lib
+        env:
+          NODE_OPTIONS: --max-old-space-size=8192
+
+      - name: Build schematics
+        run: npm run build:schematics
+
+      - name: Build migrations
+        run: npm run build:migrations
+
+      - name: Publish Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: licensed-dist-${{ github.event.client_payload.release_tag }}
+          path: dist/igniteui-angular
+          retention-days: 90
+
+      - name: Create Release Summary
+        run: |
+          echo "## 📦 Licensed Build Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version**: \`${{ github.event.client_payload.release_tag }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Source**: ${{ github.event.client_payload.public_repo }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Artifacts**: licensed-dist-${{ github.event.client_payload.release_tag }}" >> $GITHUB_STEP_SUMMARY

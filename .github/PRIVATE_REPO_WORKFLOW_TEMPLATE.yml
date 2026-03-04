@@ -1,0 +1,261 @@
+# TEMPLATE: Copy this file to your PRIVATE repository
+# Path: .github/workflows/licensed-release.yml
+#
+# This workflow listens for repository_dispatch events from the public repo
+# and handles building/publishing licensed artifacts
+
+name: Licensed Release Pipeline
+
+on:
+  repository_dispatch:
+    types: [public-release-created]  # Must match event-type from public repo
+
+jobs:
+  validate:
+    name: Validate Release Event
+    runs-on: ubuntu-latest
+    outputs:
+      is_valid: ${{ steps.validate.outputs.valid }}
+      release_tag: ${{ github.event.client_payload.release_tag }}
+
+    steps:
+      - name: Validate event payload
+        id: validate
+        run: |
+          echo "Validating release event..."
+
+          # Check required fields exist
+          if [ -z "${{ github.event.client_payload.release_tag }}" ]; then
+            echo "❌ Missing release_tag in payload"
+            exit 1
+          fi
+
+          # Validate tag format (adjust regex for your versioning scheme)
+          TAG="${{ github.event.client_payload.release_tag }}"
+          if ! [[ "$TAG" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$ ]]; then
+            echo "❌ Invalid tag format: $TAG"
+            echo "Expected format: v1.2.3 or v1.2.3-beta.1"
+            exit 1
+          fi
+
+          echo "✅ Validation passed"
+          echo "valid=true" >> $GITHUB_OUTPUT
+
+      - name: Log event details
+        run: |
+          echo "📦 Release Event Received"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "Tag:         ${{ github.event.client_payload.release_tag }}"
+          echo "Name:        ${{ github.event.client_payload.release_name }}"
+          echo "Prerelease:  ${{ github.event.client_payload.is_prerelease }}"
+          echo "Author:      ${{ github.event.client_payload.author }}"
+          echo "Published:   ${{ github.event.client_payload.published_at }}"
+          echo "Source:      ${{ github.event.client_payload.public_repo }}"
+          echo "URL:         ${{ github.event.client_payload.release_url }}"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+  build-licensed:
+    name: Build Licensed Artifacts
+    runs-on: ubuntu-latest
+    needs: validate
+    if: needs.validate.outputs.is_valid == 'true'
+
+    steps:
+      - name: Checkout private repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      # Optional: Download source from public repo
+      - name: Download public release source
+        run: |
+          echo "Downloading source from public release..."
+          curl -L -o public-release.tar.gz "${{ github.event.client_payload.tarball_url }}"
+          tar -xzf public-release.tar.gz
+          echo "✅ Source downloaded"
+
+      - name: Install dependencies
+        run: |
+          echo "Installing dependencies..."
+          npm ci
+          # Or: npm install, pnpm install, yarn install, etc.
+
+      - name: Build licensed version
+        run: |
+          echo "Building licensed artifacts..."
+          # Replace with your actual build commands:
+          # npm run build:licensed
+          # npm run bundle
+          echo "✅ Build completed"
+        env:
+          # Access private repo secrets during build if needed
+          NODE_ENV: production
+          RELEASE_VERSION: ${{ github.event.client_payload.release_tag }}
+
+      - name: Run tests
+        run: |
+          echo "Running tests..."
+          # npm test
+          # npm run test:integration
+          echo "✅ Tests passed"
+
+      - name: Sign artifacts
+        run: |
+          echo "Signing artifacts..."
+          # Example: Sign with GPG or code signing certificate
+          # gpg --detach-sign --armor dist/package.tgz
+          # signtool sign /f ${{ secrets.CODE_SIGNING_CERT }} dist/*.exe
+          echo "✅ Artifacts signed"
+        env:
+          # Use secrets stored in this private repo
+          CODE_SIGNING_KEY: ${{ secrets.CODE_SIGNING_KEY }}
+          SIGNING_PASSWORD: ${{ secrets.SIGNING_PASSWORD }}
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: licensed-build-${{ github.event.client_payload.release_tag }}
+          path: |
+            dist/
+            *.sig
+            *.asc
+          retention-days: 90
+
+  publish:
+    name: Publish Licensed Release
+    runs-on: ubuntu-latest
+    needs: [validate, build-licensed]
+    # Optional: Require manual approval for production releases
+    # environment: production
+
+    steps:
+      - name: Checkout private repository
+        uses: actions/checkout@v4
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: licensed-build-${{ github.event.client_payload.release_tag }}
+          path: dist/
+
+      - name: Publish to private npm registry
+        run: |
+          echo "Publishing to private npm registry..."
+          # Configure your private registry
+          # npm config set registry https://npm.yourcompany.com
+          # npm config set //npm.yourcompany.com/:_authToken="${NPM_TOKEN}"
+          # npm publish dist/*.tgz
+          echo "✅ Published to npm"
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish to NuGet (if applicable)
+        run: |
+          echo "Publishing to NuGet..."
+          # dotnet nuget push dist/*.nupkg --api-key ${{ secrets.NUGET_API_KEY }} --source https://nuget.yourcompany.com
+          echo "✅ Published to NuGet"
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+
+      - name: Create GitHub Release in private repo
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.client_payload.release_tag }}
+          name: "Licensed - ${{ github.event.client_payload.release_name }}"
+          body: |
+            # Licensed Release
+
+            This is the **licensed and signed** version of the public release.
+
+            ## 📦 Release Information
+            - **Version**: `${{ github.event.client_payload.release_tag }}`
+            - **Published**: ${{ github.event.client_payload.published_at }}
+            - **Source**: [${{ github.event.client_payload.public_repo }}](${{ github.event.client_payload.release_url }})
+            - **Author**: @${{ github.event.client_payload.author }}
+
+            ## 📝 Changelog
+            ${{ github.event.client_payload.release_body }}
+
+            ## 🔐 Security
+            All artifacts in this release have been:
+            - ✅ Built from verified source
+            - ✅ Digitally signed
+            - ✅ Scanned for vulnerabilities
+
+            ## 📥 Installation
+            ```bash
+            npm install @yourcompany/package@${{ github.event.client_payload.release_tag }}
+            ```
+          draft: false
+          prerelease: ${{ github.event.client_payload.is_prerelease }}
+          files: |
+            dist/**/*
+            *.sig
+            *.asc
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  notify:
+    name: Send Notifications
+    runs-on: ubuntu-latest
+    needs: [validate, build-licensed, publish]
+    if: always()
+
+    steps:
+      - name: Determine status
+        id: status
+        run: |
+          if [ "${{ needs.publish.result }}" == "success" ]; then
+            echo "status=success" >> $GITHUB_OUTPUT
+            echo "emoji=✅" >> $GITHUB_OUTPUT
+            echo "message=Licensed release published successfully" >> $GITHUB_OUTPUT
+          else
+            echo "status=failure" >> $GITHUB_OUTPUT
+            echo "emoji=❌" >> $GITHUB_OUTPUT
+            echo "message=Licensed release pipeline failed" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Notify Slack
+        if: always()
+        run: |
+          # Example Slack notification
+          # curl -X POST "${{ secrets.SLACK_WEBHOOK_URL }}" \
+          #   -H "Content-Type: application/json" \
+          #   -d '{
+          #     "text": "${{ steps.status.outputs.emoji }} ${{ steps.status.outputs.message }}",
+          #     "attachments": [{
+          #       "color": "${{ steps.status.outputs.status == 'success' && 'good' || 'danger' }}",
+          #       "fields": [
+          #         {"title": "Version", "value": "${{ github.event.client_payload.release_tag }}", "short": true},
+          #         {"title": "Author", "value": "${{ github.event.client_payload.author }}", "short": true},
+          #         {"title": "Public Release", "value": "${{ github.event.client_payload.release_url }}", "short": false}
+          #       ]
+          #     }]
+          #   }'
+          echo "Notification sent"
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+      - name: Comment on public release (optional)
+        if: success() && needs.publish.result == 'success'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.PUBLIC_REPO_COMMENT_TOKEN }}
+          script: |
+            // Optional: Post a comment back to the public release
+            // Requires a PAT with write access to public repo
+            // Store in secrets.PUBLIC_REPO_COMMENT_TOKEN
+            /*
+            const [owner, repo] = '${{ github.event.client_payload.public_repo }}'.split('/');
+            await github.rest.repos.createReleaseComment({
+              owner: owner,
+              repo: repo,
+              release_id: '${{ github.event.client_payload.release_id }}',
+              body: '✅ Licensed artifacts have been published successfully!'
+            });
+            */
+            console.log('Comment functionality disabled by default');

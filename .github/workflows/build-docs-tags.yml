@@ -1,0 +1,322 @@
+name: Build Angular Docs (Tags)
+
+# Equivalent to Azure DevOps CI trigger: refs/tags/*
+on:
+  push:
+    tags:
+      - '*'
+  # Allows manual runs with optional isLatest override (equivalent to ADO queue-time variable)
+  workflow_dispatch:
+    inputs:
+      isLatest:
+        description: 'Override isLatest flag (leave empty to auto-detect)'
+        required: false
+        default: ''
+
+jobs:
+  build-docs:
+    runs-on: ubuntu-latest
+
+    outputs:
+      productionDeployment: ${{ steps.check-deployment.outputs.productionDeployment }}
+
+    steps:
+      # -----------------------------------------------------------------------
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          # Full history needed for git ls-remote tag sorting and git describe
+          fetch-depth: 0
+
+      # -----------------------------------------------------------------------
+      # Equivalent to: NodeTool@0 — Use Node 20.19.x
+      - name: Use Node 20.19.x
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.19.x'
+
+      # -----------------------------------------------------------------------
+      # Generate a build version once, before NuGet pack steps.
+      # ADO used build.buildnumber (e.g. "AngularDocs_20240101.1") and split on '_'.
+      # GitHub Actions equivalent uses a date + run_number format.
+      - name: Set BuildVersion
+        shell: pwsh
+        run: |
+          $buildDate = Get-Date -Format "yyyyMMdd"
+          $version = "$buildDate.${{ github.run_number }}"
+          Write-Host "BuildVersion: $version"
+          echo "BuildVersion=$version" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      # -----------------------------------------------------------------------
+      # Equivalent to: DeleteFiles@1 — Delete *.nupkg and dist
+      - name: Delete files (*.nupkg, dist)
+        shell: pwsh
+        run: |
+          Get-ChildItem -Path '${{ github.workspace }}' -Filter '*.nupkg' -File |
+            Remove-Item -Force -ErrorAction SilentlyContinue
+          if (Test-Path '${{ github.workspace }}/dist') {
+            Remove-Item '${{ github.workspace }}/dist' -Recurse -Force
+          }
+
+      # -----------------------------------------------------------------------
+      # Equivalent to: 'Extract the tag from repo' powershell step.
+      # When triggered by a tag push, github.ref_name already contains the tag name,
+      # so git describe is not needed.
+      - name: Extract the tag from repo
+        shell: pwsh
+        run: |
+          $fullTag = '${{ github.ref_name }}'
+          $split   = $fullTag -split '-'
+          $tag     = $split[0]
+          Write-Host "curTag:  $tag"
+          Write-Host "fullTag: $fullTag"
+          echo "curTag=$tag"   | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          echo "fullTag=$fullTag" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      # -----------------------------------------------------------------------
+      # Equivalent to: 'Set the isLatest flag based on current tag version'
+      # condition: eq(variables['isLatest'], '')  →  only runs when not already set.
+      # The workflow_dispatch input lets you override isLatest at queue time (same as ADO).
+      - name: Propagate manual isLatest override
+        if: github.event_name == 'workflow_dispatch' && inputs.isLatest != ''
+        shell: pwsh
+        run: |
+          echo "isLatest=${{ inputs.isLatest }}" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Set the isLatest flag based on current tag version
+        if: env.isLatest == ''
+        shell: pwsh
+        run: |
+          git ls-remote --tags --sort=-v:refname origin | Out-File currentBranch.txt -Encoding utf8
+          $content = [System.IO.File]::ReadAllLines('currentBranch.txt')
+
+          # Each line is: "<sha>\trefs/tags/<tag>"  — take the ref part and strip the prefix
+          $latestTagRef = ($content[0] -split '\s+')[1]           # refs/tags/18.5.0
+          Write-Host "latestTagRef: $latestTagRef"
+
+          $currentTag  = "$env:curTag"
+          $fullTagText = "$env:fullTag"
+          Write-Host "currentTag:  $currentTag"
+          Write-Host "fullTagText: $fullTagText"
+
+          ###STAGING isLatest###
+          $latestStaging = $latestTagRef -like "*$currentTag*"
+          Write-Host "latestTagRef -like *currentTag*: $latestStaging"
+          Write-Host "isLatest staging value: $latestStaging"
+          echo "isLatest=$latestStaging" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+          ###PRODUCTION isLatest###
+          $isOfficialTag      = -not ($fullTagText -like "*-*")
+          $indexOfCurrentTag  = -1
+
+          for ($i = 0; $i -lt $content.Length; $i++) {
+            $lineRef = ($content[$i] -split '\s+')[1]
+            Write-Host "refs/tags/ $lineRef"
+            if ($lineRef -and $lineRef.TrimEnd() -eq "refs/tags/$fullTagText") {
+              $indexOfCurrentTag = $i
+              break
+            }
+          }
+
+          $allTagsBeta = $false
+          Write-Host "indexOfCurrentTag: $indexOfCurrentTag"
+          Write-Host "full tag: $fullTagText"
+          Write-Host "isOfficialTag: $isOfficialTag"
+
+          if ($indexOfCurrentTag -ge 1) {
+            $allT = $true
+            for ($j = $indexOfCurrentTag - 1; $j -ge 0; $j--) {
+              $allT = $allT -and ($content[$j] -like '*-*')
+            }
+            $allTagsBeta = $allT
+          }
+
+          Write-Host "allTagsBeta: $allTagsBeta"
+          $latestProd = ($latestStaging -or $allTagsBeta) -and $isOfficialTag
+          Write-Host "isLatest prod value: $latestProd"
+          echo "isLatestProd=$latestProd" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      # -----------------------------------------------------------------------
+      # Equivalent to: 'Get the MajorMinor from the tag'
+      - name: Get the MajorMinor from the tag
+        shell: pwsh
+        run: |
+          $tag = "$env:curTag"
+          Write-Host "Tag version is $tag"
+          $split = $tag.split('.')
+          $num   = $split[0] + '.' + $split[1]
+          Write-Host "Num is $num"
+          [double]$d = [double]::Parse($num)
+          echo "MajorMinor=$d" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      # -----------------------------------------------------------------------
+      # Equivalent to: DutchWorkzToolsAllVariables@1 — show all build variables
+      - name: Show all build variables
+        shell: pwsh
+        run: |
+          Write-Host '=== Environment Variables ==='
+          Get-ChildItem Env: | Sort-Object Name | Format-Table Name, Value -AutoSize
+
+      # -----------------------------------------------------------------------
+      # Equivalent to: Npm@1 — npm cache clean --force
+      - name: npm cache clean --force
+        run: npm cache clean --force
+        working-directory: ${{ github.workspace }}
+
+      # Equivalent to: Npm@1 — npm ci
+      - name: npm ci
+        run: npm ci --force
+        working-directory: ${{ github.workspace }}
+
+      # Equivalent to: Npm@1 — npm run build:lib
+      - name: npm run build:lib
+        run: npm run build:lib
+        working-directory: ${{ github.workspace }}
+
+      # -----------------------------------------------------------------------
+      # ----  STAGING DOCS BUILD  ---------------------------------------------
+      # -----------------------------------------------------------------------
+
+      # Equivalent to: Npm@1 — npm run build:typedoc:en:staging
+      - name: npm run build:typedoc (staging)
+        run: npm run build:typedoc:en:staging
+        working-directory: ${{ github.workspace }}
+
+      # Equivalent to: Npm@1 — npm run build:sassdoc:en:staging
+      - name: npm run build:sassdoc (staging)
+        run: npm run build:sassdoc:en:staging
+        working-directory: ${{ github.workspace }}
+
+      # Equivalent to: CopyFiles@2 — Copy angularDocsPostDeploy.ps1 to dist
+      - name: Copy angularDocsPostDeploy.ps1 to dist (staging)
+        shell: pwsh
+        run: |
+          $targetDir = '${{ github.workspace }}/dist/igniteui-angular/docs'
+          New-Item -ItemType Directory -Force -Path $targetDir | Out-Null
+          Copy-Item -Path '${{ github.workspace }}/angularDocsPostDeploy.ps1' -Destination $targetDir -Force
+
+      # Equivalent to: powershell — Update PostDeploy.ps1 vars (staging)
+      - name: Update PostDeploy.ps1 vars (staging)
+        shell: pwsh
+        run: |
+          $filePath = '${{ github.workspace }}/dist/igniteui-angular/docs/angularDocsPostDeploy.ps1'
+          ((Get-Content -Path $filePath -Raw) -replace 'VariableValue',   "$env:curTag")   |
+            Set-Content -Path $filePath
+          ((Get-Content -Path $filePath -Raw) -replace 'VariableIsLatest', "$env:isLatest") |
+            Set-Content -Path $filePath
+
+      # Equivalent to: script — rename angularDocsPostDeploy.ps1 PostDeploy.ps1
+      - name: Rename PostDeploy.ps1 (staging)
+        shell: pwsh
+        run: |
+          Rename-Item -Path '${{ github.workspace }}/dist/igniteui-angular/docs/angularDocsPostDeploy.ps1' `
+                      -NewName 'PostDeploy.ps1'
+
+      # Upload the staging docs as a workflow artifact for the deploy job
+      - name: Upload staging artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: angularDocsEN-staging
+          path: dist/igniteui-angular/docs/
+
+      # -----------------------------------------------------------------------
+      # ----  PRODUCTION DOCS BUILD  ------------------------------------------
+      # -----------------------------------------------------------------------
+
+      # Equivalent to: Npm@1 — npm run build:typedoc:en:production
+      - name: npm run build:typedoc (production)
+        run: npm run build:typedoc:en:production
+        working-directory: ${{ github.workspace }}
+
+      # Equivalent to: Npm@1 — npm run build:sassdoc:en:production
+      - name: npm run build:sassdoc (production)
+        run: npm run build:sassdoc:en:production
+        working-directory: ${{ github.workspace }}
+
+      # Equivalent to: DeleteFiles@1 — Delete PostDeploy.ps1 from dist
+      - name: Delete PostDeploy.ps1 from dist folder
+        shell: pwsh
+        run: |
+          Remove-Item -Path '${{ github.workspace }}/dist/igniteui-angular/docs/PostDeploy.ps1' `
+                      -Force -ErrorAction SilentlyContinue
+
+      # Equivalent to: CopyFiles@2 — Copy angularDocsPostDeploy.ps1 to dist (prod)
+      - name: Copy angularDocsPostDeploy.ps1 to dist (production)
+        shell: pwsh
+        run: |
+          Copy-Item -Path '${{ github.workspace }}/angularDocsPostDeploy.ps1' `
+                    -Destination '${{ github.workspace }}/dist/igniteui-angular/docs' -Force
+
+      # Equivalent to: powershell — Update PostDeploy.ps1 vars (production)
+      - name: Update PostDeploy.ps1 vars (production)
+        shell: pwsh
+        run: |
+          $filePath = '${{ github.workspace }}/dist/igniteui-angular/docs/angularDocsPostDeploy.ps1'
+          ((Get-Content -Path $filePath -Raw) -replace 'VariableValue',   "$env:curTag")     |
+            Set-Content -Path $filePath
+          ((Get-Content -Path $filePath -Raw) -replace 'VariableIsLatest', "$env:isLatestProd") |
+            Set-Content -Path $filePath
+
+      # Equivalent to: script — rename angularDocsPostDeploy.ps1 PostDeploy.ps1 (prod)
+      - name: Rename PostDeploy.ps1 (production)
+        shell: pwsh
+        run: |
+          Rename-Item -Path '${{ github.workspace }}/dist/igniteui-angular/docs/angularDocsPostDeploy.ps1' `
+                      -NewName 'PostDeploy.ps1'
+
+      # Upload the production docs as a workflow artifact for the deploy job
+      - name: Upload production artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: angularDocsEN-production
+          path: dist/igniteui-angular/docs/
+
+      # -----------------------------------------------------------------------
+      # Determine whether this tag is production-eligible (no alpha/beta/rc suffix).
+      # Result is exposed as a job output so the deploy-production job can condition on it.
+      - name: Check tag and set ProductionDeployment variable
+        id: check-deployment
+        shell: pwsh
+        run: |
+          $branchName   = "${{ github.ref_name }}".ToLower()
+          $shouldDeploy = -not $branchName.Contains('alpha') `
+                          -and -not $branchName.Contains('beta') `
+                          -and -not $branchName.Contains('rc')
+          Write-Host "ProductionDeployment: $shouldDeploy"
+          echo "productionDeployment=$shouldDeploy" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+  # ---------------------------------------------------------------------------
+  # Deploy staging docs to IIS via MSDeploy.
+  # Artifacts are cross-repo; GITHUB_TOKEN in igniteui-actions is scoped to that
+  # repo, so we pass source_repo + source_run_id so the deploy workflow can use
+  # `gh run download --repo` to fetch them. If access fails, store a PAT with
+  # read:actions on igniteui-angular as a secret (e.g. ACTIONS_READ_PAT) and
+  # configure it in the deploy workflow environment.
+  deploy-staging:
+    needs: build-docs
+    uses: IgniteUI/igniteui-actions/.github/workflows/deploy.yml@master
+    secrets: inherit
+    with:
+      run-id: ${{ github.run_id }}
+      app: angular-docs-en
+      artifact_name: angularDocsEN-staging
+      source_repo: ${{ github.repository }}
+      source_run_id: ${{ github.run_id }}
+      environment: staging
+      locale: en
+
+  # ---------------------------------------------------------------------------
+  # Deploy production docs — only on CI push of a non-pre-release tag.
+  deploy-production:
+    needs: build-docs
+    if: github.event_name == 'push' && needs.build-docs.outputs.productionDeployment == 'True'
+    uses: IgniteUI/igniteui-actions/.github/workflows/deploy.yml@master
+    secrets: inherit
+    with:
+      run-id: ${{ github.run_id }}
+      app: angular-docs-en
+      artifact_name: angularDocsEN-production
+      source_repo: ${{ github.repository }}
+      source_run_id: ${{ github.run_id }}
+      environment: production
+      locale: en
