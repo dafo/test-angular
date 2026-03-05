@@ -239,3 +239,55 @@ jobs:
           name: angularDocsEN-staging
           path: dist/igniteui-angular/docs/
 
+                # -----------------------------------------------------------------------
+      # ----  PRODUCTION DOCS BUILD  ------------------------------------------
+      # -----------------------------------------------------------------------
+
+      # Equivalent to: Npm@1 — npm run build:typedoc:en:production
+      - name: npm run build:typedoc (production)
+        run: npm run build:typedoc:en:production
+        working-directory: ${{ github.workspace }}
+
+      # Equivalent to: Npm@1 — npm run build:sassdoc:en:production
+      - name: npm run build:sassdoc (production)
+        run: npm run build:sassdoc:en:production
+        working-directory: ${{ github.workspace }}
+
+      # Equivalent to: DeleteFiles@1 — Delete PostDeploy.ps1 from dist
+      - name: Delete PostDeploy.ps1 from dist folder
+        shell: pwsh
+        run: |
+          Remove-Item -Path '${{ github.workspace }}/dist/igniteui-angular/docs/PostDeploy.ps1' `
+                      -Force -ErrorAction SilentlyContinue
+
+      # Equivalent to: CopyFiles@2 — Copy angularDocsPostDeploy.ps1 to dist (prod)
+      - name: Copy angularDocsPostDeploy.ps1 to dist (production)
+        shell: pwsh
+        run: |
+          Copy-Item -Path '${{ github.workspace }}/angularDocsPostDeploy.ps1' `
+                    -Destination '${{ github.workspace }}/dist/igniteui-angular/docs' -Force
+
+      # Equivalent to: powershell — Update PostDeploy.ps1 vars (production)
+      - name: Update PostDeploy.ps1 vars (production)
+        shell: pwsh
+        run: |
+          $filePath = '${{ github.workspace }}/dist/igniteui-angular/docs/angularDocsPostDeploy.ps1'
+          ((Get-Content -Path $filePath -Raw) -replace 'VariableValue',   "$env:curTag")     |
+            Set-Content -Path $filePath
+          ((Get-Content -Path $filePath -Raw) -replace 'VariableIsLatest', "$env:isLatestProd") |
+            Set-Content -Path $filePath
+
+      # Equivalent to: script — rename angularDocsPostDeploy.ps1 PostDeploy.ps1 (prod)
+      - name: Rename PostDeploy.ps1 (production)
+        shell: pwsh
+        run: |
+          Rename-Item -Path '${{ github.workspace }}/dist/igniteui-angular/docs/angularDocsPostDeploy.ps1' `
+                      -NewName 'PostDeploy.ps1'
+
+      # Upload the production docs as a workflow artifact for the deploy job
+      - name: Upload production artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: angularDocsEN-production
+          path: dist/igniteui-angular/docs/
+
