@@ -176,3 +176,19 @@ jobs:
           Write-Host '=== Environment Variables ==='
           Get-ChildItem Env: | Sort-Object Name | Format-Table Name, Value -AutoSize
 
+          # -----------------------------------------------------------------------
+      # Equivalent to: Npm@1 — npm cache clean --force
+      - name: npm cache clean --force
+        run: npm cache clean --force
+        working-directory: ${{ github.workspace }}
+
+      # Equivalent to: Npm@1 — npm ci
+      - name: npm ci
+        run: npm ci --force
+        working-directory: ${{ github.workspace }}
+
+      # Equivalent to: Npm@1 — npm run build:lib
+      - name: npm run build:lib
+        run: npm run build:lib
+        working-directory: ${{ github.workspace }}
+
