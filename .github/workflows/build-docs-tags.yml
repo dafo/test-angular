@@ -192,3 +192,50 @@ jobs:
         run: npm run build:lib
         working-directory: ${{ github.workspace }}
 
+
+      # -----------------------------------------------------------------------
+      # ----  STAGING DOCS BUILD  ---------------------------------------------
+      # -----------------------------------------------------------------------
+
+      # Equivalent to: Npm@1 — npm run build:typedoc:en:staging
+      - name: npm run build:typedoc (staging)
+        run: npm run build:typedoc:en:staging
+        working-directory: ${{ github.workspace }}
+
+      # Equivalent to: Npm@1 — npm run build:sassdoc:en:staging
+      - name: npm run build:sassdoc (staging)
+        run: npm run build:sassdoc:en:staging
+        working-directory: ${{ github.workspace }}
+
+      # Equivalent to: CopyFiles@2 — Copy angularDocsPostDeploy.ps1 to dist
+      - name: Copy angularDocsPostDeploy.ps1 to dist (staging)
+        shell: pwsh
+        run: |
+          $targetDir = '${{ github.workspace }}/dist/igniteui-angular/docs'
+          New-Item -ItemType Directory -Force -Path $targetDir | Out-Null
+          Copy-Item -Path '${{ github.workspace }}/angularDocsPostDeploy.ps1' -Destination $targetDir -Force
+
+      # Equivalent to: powershell — Update PostDeploy.ps1 vars (staging)
+      - name: Update PostDeploy.ps1 vars (staging)
+        shell: pwsh
+        run: |
+          $filePath = '${{ github.workspace }}/dist/igniteui-angular/docs/angularDocsPostDeploy.ps1'
+          ((Get-Content -Path $filePath -Raw) -replace 'VariableValue',   "$env:curTag")   |
+            Set-Content -Path $filePath
+          ((Get-Content -Path $filePath -Raw) -replace 'VariableIsLatest', "$env:isLatest") |
+            Set-Content -Path $filePath
+
+      # Equivalent to: script — rename angularDocsPostDeploy.ps1 PostDeploy.ps1
+      - name: Rename PostDeploy.ps1 (staging)
+        shell: pwsh
+        run: |
+          Rename-Item -Path '${{ github.workspace }}/dist/igniteui-angular/docs/angularDocsPostDeploy.ps1' `
+                      -NewName 'PostDeploy.ps1'
+
+      # Upload the staging docs as a workflow artifact for the deploy job
+      - name: Upload staging artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: angularDocsEN-staging
+          path: dist/igniteui-angular/docs/
+
