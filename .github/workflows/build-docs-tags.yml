@@ -160,7 +160,7 @@ jobs:
       - name: Get the MajorMinor from the tag
         shell: pwsh
         run: |
-          $tag = "$env:curTag"
+          $tag = "$env:curTag".TrimStart('v')
           Write-Host "Tag version is $tag"
           $split = $tag.split('.')
           $num   = $split[0] + '.' + $split[1]
